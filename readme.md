@@ -1,3 +1,44 @@
+> [!NOTE]
+> **This fork adds a fix for slow text-heavy screens (flash0 font read cache).**
+> It is proposed upstream as [isage/Adrenaline#191](https://github.com/isage/Adrenaline/pull/191). A test build is available on this fork's [Releases](https://github.com/jessperler88/Adrenaline/releases) page. Everything else is unchanged from upstream.
+
+## Flash0 font read cache
+
+### The problem
+
+Games that draw text with the PSP system font (`sceFont`) can lag badly under Adrenaline, even though they run fine on a real PSP.
+
+Adrenaline redirects `flash0:` files to the Memory Stick driver, so every read and seek on them is a round trip to the VITA side, about **0.75 ms** each. `sceFont` reads glyph data straight from `flash0:/font/*.pgf` with a seek plus a few tiny reads for each character it draws. Redrawing a screen of text therefore costs hundreds of round trips.
+
+Known case: **Dissidia 012 [duodecim] Final Fantasy (ULUS10566)**. Every cursor move in the menus issued about 290 reads and 145 seeks on the font files, freezing the game for about **280 ms**. Changing the ISO driver or the Inferno cache settings doesn't help, because these reads aren't ISO reads.
+
+### The fix
+
+The change is in `cef/core/pentazemin/src/io_patch.c` (the flash driver wrapper):
+
+- Read-only files under `flash0:/font/` are served from a small LRU cache of 4 KB blocks.
+- Seeks on those files only update a position kept on the PSP side.
+- Reads of 4 KB or more go straight to the driver.
+- The cache is allocated only when a font is first opened. It tries 384 KB and falls back to smaller sizes. If no memory is available, it switches itself off and Adrenaline behaves as before.
+- No other files are affected.
+
+### Results
+
+Dissidia 012, equipment menu, on a real PS Vita:
+
+| | Before | After |
+|---|---|---|
+| Average fps (30 fps target) | 25.3 | 30.2–30.5 |
+| Late frames during menu use | 26 | 4 |
+| Worst frame | 1289 ms | 69 ms |
+| Average time per font read | ~731 µs | ~77 µs |
+
+The cache hit rate on `jpn0.pgf` was about 99.5%. No text corruption was seen in menus or gameplay.
+
+The frame figures come from the same cache running as a test plugin. The font read time was measured with this Adrenaline build itself.
+
+---
+
 6.61 Adrenaline
 ================================================================================
 
