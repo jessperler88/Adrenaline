@@ -520,6 +520,19 @@ static int _flashIoOpen(u32 *args) {
 
 	char ms_path[128];
 	int fs_num = BuildMsPathChangeFsNum(arg, file, ms_path);
+
+	// Fonts are read with a seek plus tiny reads per glyph, and every access on a
+	// redirected file is a round trip to the VITA side. Open them from the
+	// in-memory flash0 image first, and only fall back to the redirection.
+	if (fs_num == 0 && strncmp(file, "/font/", 6) == 0) {
+		arg->fs_num = fs_num;
+		int res = g_flash_funcs.IoOpen(arg, file, flags, mode);
+		if (res >= 0) {
+			return res;
+		}
+		arg->fs_num = 0;
+	}
+
 	int res = g_ms_funcs.IoOpen(arg, ms_path, flags, mode);
 	if (res >= 0) {
 		((u32 *)arg)[18] = 1;
